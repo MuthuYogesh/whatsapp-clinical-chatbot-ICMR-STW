@@ -5,7 +5,8 @@ upstash-redis
 groq
 qdrant-client
 sentence-transformers
-torch --index-url https://download.pytorch.org/whl/cpu
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.2.1+cpu
 numpy
 pymupdf
 python-multipart
