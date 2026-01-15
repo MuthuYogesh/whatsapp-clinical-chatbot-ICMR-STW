@@ -95,3 +95,9 @@ System Response: > 🚨 CRITICAL: URGENT TERTIARY REFERRAL REQUIRED.
 MANAGEMENT PLAN: • Establish and maintain airway; Intubate immediately. • Immediate transfer to Tertiary care/PICU center.
 
 EVIDENCE: STW Source: PEDS_Acute_Encephalitis_Syndrome. According to the guideline, GCS < 8 indicates life-threatening severity...
+
+
+## Production Build
+Docker Build: docker build -t whatsapp-bot .
+Verify Image: docker images
+Run: docker run -p 8080:8080 -e PORT=8080 whatsapp-bot
