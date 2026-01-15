@@ -10,3 +10,4 @@ torch==2.2.1+cpu
 numpy
 pymupdf
 python-multipart
+numpy<2.0.0
