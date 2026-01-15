@@ -25,4 +25,4 @@ EXPOSE 7860
 
 # Production command using Gunicorn
 # Points to 'app/main.py' -> 'app' object
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+sh -c "gunicorn app.main:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT"
