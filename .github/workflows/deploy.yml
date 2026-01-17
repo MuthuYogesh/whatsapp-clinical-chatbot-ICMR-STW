@@ -41,4 +41,4 @@ jobs:
             UPSTASH_REDIS_REST_TOKEN=${{ secrets.UPSTASH_REDIS_REST_TOKEN }},\
             VECTOR_DB_URL=${{ secrets.VECTOR_DB_URL }},\
             VECTOR_DB_API_KEY=${{ secrets.VECTOR_DB_API_KEY }},\
-            VERIFY_TOKEN=icmr-stw-demo"
+            WHATSAPP_VERIFY_TOKEN=${{ secrets.WHATSAPP_VERIFY_TOKEN }}"
