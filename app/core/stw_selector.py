@@ -5,40 +5,27 @@ from app.models.normalized_messages import NormalizedMessage
 ALLOWED_STWS = ["ENT_Acute_Rhinosinusitis", "PEDS_Acute_Encephalitis_Syndrome"]
 
 async def select_stw_candidates(payload: NormalizedMessage) -> Dict:
-    """Identifies and ranks potential ICMR guidelines by relevance and severity."""
-    if not payload.content:
-        return {"rankings": [], "intent": "CASE"}
-
+    """Identifies and ranks potential ICMR guidelines. Adds CLARIFY intent for ambiguity."""
     prompt = f"""
-        Analyze medical symptoms: "{payload.content}"
+        Analyze medical query: "{payload.content}"
         
-        TASK: Rank potential ICMR STWs by clinical relevance.
-        
-        GUIDELINES:
-        - PEDS_Acute_Encephalitis_Syndrome: Suspicion if CHILD has Fever + (Unconscious OR Seizures).
-        - ENT_Acute_Rhinosinusitis: Nasal discharge, sinus pain, facial pressure.
+        TASK:
+        1. Intent: 
+           - 'SEARCH' (general question, e.g., "What is AES?", "Doses for Ceftriaxone?")
+           - 'CASE' (patient symptoms or test results, e.g., "Child is unconscious")
+           - 'CLARIFY' (ambiguous or one-word queries)
+        2. Rank Guidelines: PEDS_Acute_Encephalitis_Syndrome, ENT_Acute_Rhinosinusitis.
 
-        WEIGHTING RULES:
-        1. Neuro symptoms (Unconscious, Seizures) in children = HIGH priority (Weight 0.9-1.0).
-        2. ENT symptoms = MEDIUM priority (Weight 0.3-0.5) unless neuro symptoms are present.
-        3. Omit only if 100% irrelevant.
-
-        Return ONLY JSON: 
+        Return ONLY JSON:
         {{
-            "intent": "CASE" | "SEARCH",
+            "intent": "CASE" | "SEARCH" | "CLARIFY",
             "rankings": [
-                {{ "stw": "STW_NAME", "weight": float, "reason": "short clinical justification" }}
+                {{ "stw": "STW_NAME", "weight": float, "reason": "clinical justification" }}
             ]
         }}
     """
-
-    response_data = await call_groq(messages=[{"role": "user", "content": prompt}], response_format="json_object")
-    
-    # Filter and sort by clinical weight
-    rankings = [r for r in response_data.get("rankings", []) if r["stw"] in ALLOWED_STWS]
+    response = await call_groq(messages=[{"role": "user", "content": prompt}], response_format="json_object")
+    rankings = [r for r in response.get("rankings", []) if r["stw"] in ALLOWED_STWS]
     rankings.sort(key=lambda x: x["weight"], reverse=True)
 
-    return {
-        "intent": response_data.get("intent", "CASE"),
-        "rankings": rankings
-    }
+    return {"intent": response.get("intent", "CASE"), "rankings": rankings}

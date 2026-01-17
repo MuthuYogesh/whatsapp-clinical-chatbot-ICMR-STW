@@ -1,0 +1,37 @@
+name: Deploy Chatbot to Google Cloud Run
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build and Push to Artifact Registry
+        run: |
+          gcloud auth configure-docker us-central1-docker.pkg.dev
+          docker build -t us-central1-docker.pkg.dev/optimal-mender-467912-t5/chatbot-repo/clinical-bot:latest .
+          docker push us-central1-docker.pkg.dev/optimal-mender-467912-t5/chatbot-repo/clinical-bot:latest
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy clinical-chatbot \
+            --image us-central1-docker.pkg.dev/optimal-mender-467912-t5/chatbot-repo/clinical-bot:latest \
+            --region us-central1 \
+            --platform managed \
+            --allow-unauthenticated \
+            --memory 2Gi \
+            --cpu 1 \
+            --set-env-vars "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }},WHATSAPP_TOKEN=${{ secrets.WHATSAPP_TOKEN }},VECTOR_DB_URL=${{ secrets.VECTOR_DB_URL }},VECTOR_DB_API_KEY=${{ secrets.VECTOR_DB_API_KEY }},VERIFY_TOKEN=icmr-stw-demo"

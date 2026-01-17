@@ -3,12 +3,13 @@ from app.llm.groq_client import call_groq
 from app.models.normalized_messages import NormalizedMessage
 
 async def detect_intent(payload: NormalizedMessage) -> str:
+
     if not payload.content:
         return "unknown"
 
     text = payload.content.lower().strip()
-
-    # 1. FAST GREETING CHECK
+    
+      # 1. FAST GREETING CHECK
     greet_set = {"hi", "hello", "hey", "good morning", "good evening", "morning", "evening"}
     clean_str = re.sub(r'[^\w\s]', ' ', text)
     msg_set = set(clean_str.split())
@@ -24,7 +25,7 @@ async def detect_intent(payload: NormalizedMessage) -> str:
         "mg", "ml", "tablet", "antibiotic", "dose", "days", "patient",
         "fever", "seizure", "convulsion", "drowsy", "unconscious", "gcs", 
         "nasal", "sinus", "blocked", "discharge", "pain", "breathing",
-        "vitals", "bp", "pulse", "stiffness", "lethargy", "vomiting"
+        "vitals", "bp", "pulse", "stiffness", "lethargy", "vomiting", "headache", "unconscious", "altered sensorium", "immuno", "diabetic", "sinus"
     }
     
     if any(word in msg_set for word in clinical_keywords):

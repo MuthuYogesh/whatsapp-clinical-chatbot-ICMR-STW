@@ -32,7 +32,7 @@ def fallback_response(reason: str) -> str:
         ),
 
         "out_of_scope": (
-            "I am designed to assist specifically with clinical queries based on ICMR STWs. "
+            "Hi, I am designed to assist specifically with clinical queries based on ICMR STWs. "
             "Please describe a patient's symptoms or clinical signs to begin the management plan."
         )
     }
