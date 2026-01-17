@@ -34,4 +34,11 @@ jobs:
             --allow-unauthenticated \
             --memory 2Gi \
             --cpu 1 \
-            --set-env-vars "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }},WHATSAPP_TOKEN=${{ secrets.WHATSAPP_TOKEN }},VECTOR_DB_URL=${{ secrets.VECTOR_DB_URL }},VECTOR_DB_API_KEY=${{ secrets.VECTOR_DB_API_KEY }},VERIFY_TOKEN=icmr-stw-demo"
+            --set-env-vars "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }},\
+            WHATSAPP_TOKEN=${{ secrets.WHATSAPP_TOKEN }},\
+            WHATSAPP_PHONE_NUMBER_ID=${{ secrets.WHATSAPP_PHONE_NUMBER_ID }},\
+            REDIS_URL=${{ secrets.REDIS_URL }},\
+            REDIS_TOKEN=${{ secrets.REDIS_TOKEN }},\
+            VECTOR_DB_URL=${{ secrets.VECTOR_DB_URL }},\
+            VECTOR_DB_API_KEY=${{ secrets.VECTOR_DB_API_KEY }},\
+            VERIFY_TOKEN=icmr-stw-demo"
