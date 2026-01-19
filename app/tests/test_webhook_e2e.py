@@ -145,5 +145,6 @@ def test_complex_diagnoses(mock_send, query, expected):
     for word in expected:
         assert word.lower() in sent_text.lower()
 
+
 if __name__ == "__main__":
     pytest.main([__file__, "-s", "-W", "ignore::DeprecationWarning"])
