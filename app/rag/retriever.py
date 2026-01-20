@@ -1,20 +1,16 @@
 from app.rag.embeddings import embed_texts
 from app.rag.vector_store import VectorStore
 
-# Collection dimension for all-MiniLM-L6-v2 is 384
-DIMENSION = 384
-
-async def retrieve_relevant_chunks(
-    stw_name: str,
-    query: str,
-    top_k: int = 7 # Increased to 7 to handle fragmented chunks better
-) -> list[str]:
+async def retrieve_relevant_chunks(query: str, top_k: int = 15) -> list[dict]:
     """
-    Connects to Qdrant Cloud to fetch relevant STW context.
+    Retrieves clinical guidelines from the unified knowledge base.
+    Returns a list of dictionaries containing 'text' and 'source'.
     """
-    # Create a transient store instance to handle the search
-    # (QdrantClient handles connection pooling internally)
-    store = VectorStore(collection_name=stw_name)
+    # Uses the unified collection established for the 4 volumes
+    store = VectorStore(collection_name="icmr_stw_knowledge_base")
     
+    # Generate embedding for the clinical query
     query_embedding = embed_texts([query])
+    
+    # Returns the list of payloads (dicts) from VectorStore
     return await store.search(query_embedding, top_k)
