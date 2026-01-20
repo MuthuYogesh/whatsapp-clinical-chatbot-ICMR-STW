@@ -2,56 +2,48 @@ import json
 from app.llm.groq_client import call_groq
 from app.rag.retriever import retrieve_relevant_chunks
 
-async def explain_with_rag(
-    stw_name: str,
-    rule_result: dict,
-    clinical_facts: dict,
-    query_override: str = None 
-) -> str:
+async def explain_with_strict_rag(query: str, expanded_search: str = None, demographics: dict = None) -> str:
     """
-    STRICT RAG EXPLAINER: Updated to prioritize COMPREHENSIVE clinical bundles
-    to ensure expected test keywords (Acyclovir, hydration, etc.) are never missed.
+    Strictly answers from the unified PDF context. 
+    Uses expanded_search for retrieval and original query for grounding.
     """
-
-    if query_override:
-        rag_query = query_override
-        task_description = f"Search the guideline and answer: '{query_override}'."
-    else:
-        rag_query = f"STW: {stw_name} Decision: {rule_result.get('status')} Facts: {json.dumps(clinical_facts)}"
-        task_description = "Explain the clinical reasoning for this decision based exclusively on the guideline."
-
-    # Retrieve chunks (k=7 is essential to catch separate paragraphs for drugs vs. supportive care)
-    chunks = await retrieve_relevant_chunks(stw_name, rag_query)
-    context = "\n\n".join(chunks)
-
-    prompt = f"""
-    You are a clinical assistant for the ICMR Standard Treatment Workflow (STW): {stw_name}.
+    # 1. Search the library using the expanded clinical terms if provided
+    # If no expanded_search exists, fallback to the original query
+    search_term = expanded_search if expanded_search else query
+    chunks_with_metadata = await retrieve_relevant_chunks(search_term)
     
-    CONTEXT FROM PDF:
+    # 2. Format the context with clear volume markers
+    context_blocks = []
+    for chunk in chunks_with_metadata:
+        source_name = chunk.get('source', 'Unknown Volume')
+        context_blocks.append(f"[Source: {source_name}]\n{chunk['text']}")
+    
+    context = "\n\n---\n\n".join(context_blocks)
+
+    # 3. Enhanced Medical Prompt with Clinical Inference Rules
+    prompt = f"""
+    SYSTEM: You are a Medical Evidence Assistant. Answer ONLY using the context provided.
+    PATIENT DATA: {json.dumps(demographics) if demographics else "Unknown"}
+    
+    OFFICIAL CLINICAL CONTEXT (ICMR STWs/WHO):
     \"\"\"
     {context}
     \"\"\"
 
-    TASK: {task_description}
+    USER QUERY: {query}
 
-    STRICT COMPREHENSIVENESS RULES:
-    1. EMPIRICAL TREATMENT: If asked about antibiotics or initial treatment for AES, you MUST include both "Ceftriaxone" AND "Acyclovir" if they appear in the context.
-    2. SUPPORTIVE CARE: If the query mentions "fever" or "hydration", you MUST include the full supportive care bundle: "hydration", "euglycemia", and "IV fluids".
-    3. LITERAL TERMINOLOGY: Use the exact technical strings required for validation:
-       - Use "PEDS_Acute_Encephalitis_Syndrome" when identifying the guideline name.
-       - Use "GCS < 8" (include the acronym GCS).
-       - Use "IV fluids" explicitly when discussing fluid management.
-       - Use "100 mg/kg/day" (with space) and "7 days".
-    4. NO OMISSION: Even if a query is specific (e.g., "how to control fever"), include the related mandatory management steps (e.g., hydration) found in that same clinical section.
-
-    Write a professional, comprehensive response using only the provided context.
+    STRICT RULES:
+    1. SOURCE CITATION: You MUST start your response by explicitly naming the guideline volume used (e.g., "According to the ICMR STW in Vol1.pdf...").
+    2. CLINICAL INFERENCE: You are allowed to apply clinical logic. If the context says "Refer if symptoms persist after 48 hours," and the user mentions "10 days," conclude that referral is necessary based on that timeline.
+    3. SEARCH FOR SYNONYMS: If the user asks for a specific drug (e.g., "Oxymetazoline"), ensure you look for its clinical category (e.g., "Nasal Decongestants") within the provided context.
+    4. NO GAP-FILLING: If information is entirely missing from the context (e.g., a specific drug dose not listed), say: 
+       "The guidelines mention [X], but do not specify [Y]. I am prohibited from using general knowledge to fill this gap."
+    5. PROFESSIONAL TONE: Maintain a strictly clinical, professional tone.
     """
 
-    explanation = await call_groq(
+    return await call_groq(
         messages=[{"role": "user", "content": prompt}],
         model="llama-3.3-70b-versatile",
         temperature=0,
         response_format="text"
     )
-
-    return explanation if explanation else "The requested clinical information is not present in the STW context."

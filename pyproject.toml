@@ -30,3 +30,5 @@ test = [
 pythonpath = ["."]
 asyncio_mode = "auto"
 testpaths = ["app/tests"]
+# Required for newer versions of pytest-asyncio
+asyncio_default_fixture_loop_scope = "function"
