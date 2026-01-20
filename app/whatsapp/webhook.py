@@ -43,11 +43,12 @@ async def medical_orchestrator(sender_id: str, text: str):
     if not state or text.lower() in ["/start", "hi", "hello", "restart"]:
         clear_state(sender_id)
         welcome = (
-            "🏥 *Clinical Evidence Assistant*\n\n"
+            "🏥 *Welcome, I'm Your Clinical Evidence Assistant*\n\n"
             "Grounded *strictly* in ICMR-STW official guidelines.\n\n"
+            "Examples of queries you can ask:\n"
             "• *General Queries:* 'What is the dose for Acyclovir?'\n"
             "• *Patient Cases:* Describe symptoms for treatment flows.\n\n"
-            "Type */start* to reset at any time."
+            "Type */start* to start or reset at any time."
         )
         await send_whatsapp_message(sender_id, welcome)
         set_state(sender_id, {"step": "READY", "demographics": {}})

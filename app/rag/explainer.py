@@ -33,7 +33,7 @@ async def explain_with_strict_rag(query: str, expanded_search: str = None, demog
     USER QUERY: {query}
 
     STRICT RULES:
-    1. SOURCE CITATION: You MUST start your response by explicitly naming the guideline volume used (e.g., "According to the ICMR STW in Vol1.pdf...").
+    1. SOURCE CITATION: You MUST start your response by explicitly naming the guideline volume used (e.g., "According to the ICMR STW in Vol1-STW-ENT-Rhinosinusitis...").
     2. CLINICAL INFERENCE: You are allowed to apply clinical logic. If the context says "Refer if symptoms persist after 48 hours," and the user mentions "10 days," conclude that referral is necessary based on that timeline.
     3. SEARCH FOR SYNONYMS: If the user asks for a specific drug (e.g., "Oxymetazoline"), ensure you look for its clinical category (e.g., "Nasal Decongestants") within the provided context.
     4. NO GAP-FILLING: If information is entirely missing from the context (e.g., a specific drug dose not listed), say: 
