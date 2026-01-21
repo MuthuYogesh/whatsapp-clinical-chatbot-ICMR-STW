@@ -46,8 +46,9 @@ async def medical_orchestrator(sender_id: str, text: str):
         welcome = (
             "🏥 *Clinical Evidence Assistant (v2)*\n\n"
             "Grounded *strictly* in ICMR-STW official guidelines.\n\n"
-            "• *General Queries:* 'Dose of Amoxicillin?'\n"
-            "• *Patient Cases:* 'Child with high fever...'\n\n"
+            "Example Uages:\n"
+            "• *General Queries:* 'eg: What is the Dose of Amoxicillin?'\n"
+            "• *Patient Cases:* 'eg: Child with high fever...'\n\n"
             "Type */start* to reset session data at any time."
         )
         await send_whatsapp_message(sender_id, welcome)
