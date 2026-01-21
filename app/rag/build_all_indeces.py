@@ -3,21 +3,19 @@ import uuid
 import math
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
-from app.rag.loader import load_pdf_text
+from app.rag.loader import load_pdf_with_metadata  # Use the new loader
 from app.rag.chunker import chunk_text
 from app.rag.embeddings import embed_texts
 from app.config import VECTOR_DB_URL, VECTOR_DB_API_KEY
 
 VOLUMES = ["Vol1.pdf", "Vol2.pdf", "Vol3.pdf", "Vol4.pdf"]
-BATCH_SIZE = 100  # Smaller batches prevent "write operation timed out" errors
+BATCH_SIZE = 100
 
 def build_unified_index():
     client = QdrantClient(url=VECTOR_DB_URL, api_key=VECTOR_DB_API_KEY)
     collection_name = "icmr_stw_knowledge_base"
 
     print(f"🚀 Recreating collection: {collection_name}")
-    
-    # Updated: Using non-deprecated method to recreate collection
     if client.collection_exists(collection_name):
         client.delete_collection(collection_name)
     
@@ -26,59 +24,56 @@ def build_unified_index():
         vectors_config=models.VectorParams(size=384, distance=models.Distance.COSINE),
     )
 
-    # MANDATORY: Create payload index for the 'source' field
-    client.create_payload_index(
-        collection_name=collection_name,
-        field_name="source",
-        field_schema=models.PayloadSchemaType.KEYWORD,
-    )
+    # Payload indexes for optimized filtering
+    for field in ["source", "stw_name"]:
+        client.create_payload_index(
+            collection_name=collection_name,
+            field_name=field,
+            field_schema=models.PayloadSchemaType.KEYWORD,
+        )
 
     for file in VOLUMES:
         filename = f"data/stw/{file}"
-        if not os.path.exists(filename):
-            print(f"⚠️  Skipping: {filename} (File not found!)")
-            continue
+        if not os.path.exists(filename): continue
 
         print(f"📄 Processing: {filename}...")
         try:
-            # 1. Extract, Chunk, and Embed
-            text = load_pdf_text(filename)
-            if not text.strip():
-                print(f"❌ No text extracted from {filename}.")
-                continue
+            pages_data = load_pdf_with_metadata(filename)
+            all_points = []
 
-            chunks = chunk_text(text)
-            embeddings = embed_texts(chunks)
-            total_chunks = len(chunks)
-            print(f"   -> Generated {total_chunks} chunks.")
+            for page in pages_data:
+                # Chunk each page individually to keep metadata accurate
+                chunks = chunk_text(page["text"])
+                if not chunks: continue
+                
+                embeddings = embed_texts(chunks)
 
-            # 2. Create Point List
-            all_points = [
-                models.PointStruct(
-                    id=str(uuid.uuid4()), 
-                    vector=emb.tolist(), 
-                    payload={
-                        "text": chunks[i], 
-                        "source": file # Using file name for clean citation
-                    }
-                )
-                for i, emb in enumerate(embeddings)
-            ]
+                for i, emb in enumerate(embeddings):
+                    all_points.append(
+                        models.PointStruct(
+                            id=str(uuid.uuid4()), 
+                            vector=emb.tolist(), 
+                            payload={
+                                "text": chunks[i], 
+                                "source": file,
+                                "page_number": page["page_number"],
+                                "stw_name": page["stw_title"]
+                            }
+                        )
+                    )
 
-            # 3. Batch Upload Logic
-            num_batches = math.ceil(total_chunks / BATCH_SIZE)
+            # Batch Upload
+            total_points = len(all_points)
+            num_batches = math.ceil(total_points / BATCH_SIZE)
             for i in range(num_batches):
                 start = i * BATCH_SIZE
-                end = min((i + 1) * BATCH_SIZE, total_chunks)
-                batch = all_points[start:end]
-                
-                print(f"   ⬆️  Uploading batch {i+1}/{num_batches} ({len(batch)} points)...")
-                client.upsert(collection_name=collection_name, points=batch)
+                end = min((i + 1) * BATCH_SIZE, total_points)
+                client.upsert(collection_name=collection_name, points=all_points[start:end])
 
-            print(f"✅ Successfully indexed all {total_chunks} points for {filename}.")
+            print(f"✅ Indexed {total_points} points for {file}.")
 
         except Exception as e:
-            print(f"❌ Failed to process {filename}: {e}")
+            print(f"❌ Error: {e}")
 
 if __name__ == "__main__":
     build_unified_index()
