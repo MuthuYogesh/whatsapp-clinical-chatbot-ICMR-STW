@@ -44,7 +44,7 @@ async def explain_with_strict_rag(query: str, expanded_search: str = None, demog
 
     STRICT RESPONSE RULES:
     1. MANDATORY OPENING: You MUST start the response by identifying the primary STW used.
-       Format: "According to the **[Full REF_ID]**..." 
+       Format: "According to the *[Full REF_ID]*..." 
     
     2. CLINICAL BRIDGING: If the user asks about a specific drug (e.g., Oxymetazoline) and the context discusses its therapeutic class (e.g., Topical Nasal Decongestants), you MUST apply the guidelines for that class to the specific drug. 
     
