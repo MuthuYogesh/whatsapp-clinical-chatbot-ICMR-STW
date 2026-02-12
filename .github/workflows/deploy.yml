@@ -45,4 +45,4 @@ jobs:
             WHATSAPP_VERIFY_TOKEN=${{ secrets.WHATSAPP_VERIFY_TOKEN }}
             WHATSAPP_APP_SECRET=${{ secrets.WHATSAPP_APP_SECRET }}
             LIMIT_DAY=${{ secrets.LIMIT_DAY }}
-            LIMIT_MINUTE=${{ secrets.LIMIT_MINUTE }}
+            LIMIT_MINUTE=${{ secrets.LIMIT_MINUTE }}"
