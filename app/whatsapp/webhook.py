@@ -26,16 +26,8 @@ async def verify(hub_mode: str = Query(None, alias="hub.mode"),
     return Response(status_code=403)
 
 @router.post("/webhook-whatsapp")
-@limiter.limit(LIMIT_STRATEGY)  # Apply rate limiting to the POST endpoint
+@limiter.limit(LIMIT_STRATEGY)
 async def receive(request: Request, background_tasks: BackgroundTasks):
-    """
-    Main entry point for incoming WhatsApp messages. This endpoint:
-    1. Parses incoming messages and identifies the sender and text.
-    2. Uses a turn-level intent classifier to determine if the message is a general query or a clinical case.
-    3. If it's a clinical case, initiates a demographic collection sequence.
-    4. Once all necessary information is collected, it processes the query with RAG and responds.
-    """
-    print(LIMIT_STRATEGY)
     payload = await request.json()
     for entry in payload.get("entry", []):
         for change in entry.get("changes", []):
@@ -48,11 +40,10 @@ async def receive(request: Request, background_tasks: BackgroundTasks):
     return {"status": "accepted"}
 
 async def medical_orchestrator(sender_id: str, text: str):
-    """Orchestrates the entire flow for processing incoming WhatsApp messages, including intent detection, demographic collection, RAG processing, and response sending."""
     try:
-        state = get_state(sender_id)
+        state = get_state(sender_id) or {"step": "READY", "demographics": {}}
         
-        # 1. GLOBAL RESET LOGIC
+        # 1. GLOBAL RESET
         if text.lower() in ["/start", "hi", "hello", "restart"]:
             clear_state(sender_id)
             welcome = (
@@ -66,61 +57,71 @@ async def medical_orchestrator(sender_id: str, text: str):
             set_state(sender_id, {"step": "READY", "demographics": {}})
             return
 
-        # 2. TURN-LEVEL INTENT DETECTION
-        analysis = await detect_medical_intent(text)
-        intent_type = analysis.get("type") # 'general' or 'case'
-        expanded_q = analysis.get("expanded_query", text)
-
-        # 3. DEMOGRAPHIC COLLECTION GATE
-        # We only enter/stay here if the intent is a 'case'
-        if state and state.get("step") == "AWAITING_DEMOGRAPHICS":
-            # If user switches to a general query mid-collection, break out
-            if intent_type == "general":
-                state["step"] = "READY"
-                state["pending_query"] = None
-                # Fall through to PRIMARY PROCESSING below
+        # 2. FLOW ROUTING
+        # IF WE ARE COLLECTING DATA:
+        if state.get("step") == "AWAITING_DEMOGRAPHICS":
+            idx = state.get("demographic_idx", 0)
+            key = DEMOGRAPHIC_QUESTIONS[idx]["key"]
+            
+            # Save current answer
+            state["demographics"][key] = text
+            
+            if idx + 1 < len(DEMOGRAPHIC_QUESTIONS):
+                # Ask Next Question
+                state["demographic_idx"] = idx + 1
+                next_q = DEMOGRAPHIC_QUESTIONS[idx+1]["question"]
+                set_state(sender_id, state)
+                return await send_whatsapp_message(sender_id, next_q)
             else:
-                idx = state.get("demographic_idx", 0)
-                key = DEMOGRAPHIC_QUESTIONS[idx]["key"]
-                state["demographics"][key] = text
+                # --- CASE COMPLETE: PROCESS FINAL RAG ---
+                # Retrieve the locked data
+                original_query = state.get("pending_query")
+                original_analysis = state.get("pending_analysis", {})
                 
-                if idx + 1 < len(DEMOGRAPHIC_QUESTIONS):
-                    state["demographic_idx"] = idx + 1
-                    next_q = DEMOGRAPHIC_QUESTIONS[idx+1]["question"]
-                    set_state(sender_id, state)
-                    return await send_whatsapp_message(sender_id, next_q)
-                else:
-                    state["step"] = "READY"
-                    query_to_process = state.get("pending_query", text)
-                    answer = await explain_with_strict_rag(query_to_process, expanded_q, state["demographics"])
-                    
-                    log_clinical_session(sender_id, query_to_process, "case", state["demographics"], state.get("last_refs", []), answer)
-                    await send_whatsapp_message(sender_id, answer)
-                    
-                    state.update({"pending_query": None, "demographics": {}})
-                    set_state(sender_id, state)
-                    return
+                # IMPORTANT: Use the original intent data for the explainer
+                answer = await explain_with_strict_rag(
+                    query=original_query, 
+                    expanded_search=original_analysis.get("expanded_query"), 
+                    demographics=state["demographics"],
+                    intent_data=original_analysis
+                )
+                
+                await send_whatsapp_message(sender_id, answer)
+                log_clinical_session(sender_id, original_query, "case", state["demographics"], [], answer)
+                
+                # Clean up state
+                clear_state(sender_id)
+                set_state(sender_id, {"step": "READY", "demographics": {}})
+                return
+
+        # 3. NEW INTENT DETECTION (Only reached if not in the middle of a case)
+        analysis = await detect_medical_intent(text)
+        intent_type = analysis.get("type") 
+        expanded_q = analysis.get("expanded_query", text)
 
         # 4. PRIMARY PROCESSING (READY STATE)
         if intent_type == "case":
-            # Start demographic sequence for new cases
+            # Initiate demographic sequence
             set_state(sender_id, {
                 "step": "AWAITING_DEMOGRAPHICS",
                 "demographic_idx": 0,
                 "pending_query": text,
+                "pending_analysis": analysis, # Save the clinical domains/intent here!
                 "demographics": {}
             })
             return await send_whatsapp_message(sender_id, DEMOGRAPHIC_QUESTIONS[0]["question"])
         
         else:
-            # DIRECT RAG for General Queries (No demographics asked)
-            answer = await explain_with_strict_rag(text, expanded_q, {})
-            
-            log_clinical_session(sender_id, text, "general", {}, state.get("last_refs", []) if state else [], answer)
+            # General Queries
+            answer = await explain_with_strict_rag(
+                query=text, 
+                expanded_search=expanded_q, 
+                demographics={}, 
+                intent_data=analysis
+            )
             await send_whatsapp_message(sender_id, answer)
-            
-            if not state:
-                set_state(sender_id, {"step": "READY", "demographics": {}})
+            log_clinical_session(sender_id, text, "general", {}, [], answer)
+            set_state(sender_id, {"step": "READY", "demographics": {}})
 
     except Exception as e:
         print(f"Error in orchestrator: {e}")
