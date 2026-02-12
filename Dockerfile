@@ -15,13 +15,10 @@ RUN useradd -m -u 1000 user && chown -R user:user /app
 # 4. Install Python dependencies as root to ensure global availability
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir -r requirements.txt
 
-# 5. PRE-DOWNLOAD MODEL: Build phase download
-# We run this as root so it can create the cache directory properly
-RUN pip install --no-cache-dir torch transformers sentence-transformers && \
-    python3 -c "import torch; from sentence_transformers import SentenceTransformer; \
+# Step 7: Model caching (No need to reinstall libraries here!)
+RUN python3 -c "from sentence_transformers import SentenceTransformer; \
     model = SentenceTransformer('all-MiniLM-L6-v2'); \
     model.save('./model_cache/all-MiniLM-L6-v2')" && \
     chown -R user:user /app/model_cache
