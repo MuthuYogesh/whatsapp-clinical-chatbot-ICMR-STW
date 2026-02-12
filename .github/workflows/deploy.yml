@@ -42,7 +42,7 @@ jobs:
             UPSTASH_REDIS_REST_TOKEN=${{ secrets.UPSTASH_REDIS_REST_TOKEN }},\
             VECTOR_DB_URL=${{ secrets.VECTOR_DB_URL }},\
             VECTOR_DB_API_KEY=${{ secrets.VECTOR_DB_API_KEY }},\
-            WHATSAPP_VERIFY_TOKEN=${{ secrets.WHATSAPP_VERIFY_TOKEN }}
-            WHATSAPP_APP_SECRET=${{ secrets.WHATSAPP_APP_SECRET }}
-            LIMIT_DAY=${{ secrets.LIMIT_DAY }}
-            LIMIT_MINUTE=${{ secrets.LIMIT_MINUTE }}"
+            WHATSAPP_VERIFY_TOKEN=${{ secrets.WHATSAPP_VERIFY_TOKEN }},\
+            WHATSAPP_APP_SECRET=${{ secrets.WHATSAPP_APP_SECRET }},\
+            LIMIT_DAY=${{ secrets.LIMIT_DAY }},\
+            LIMIT_MINUTE=${{ secrets.LIMIT_MINUTE }},\"
