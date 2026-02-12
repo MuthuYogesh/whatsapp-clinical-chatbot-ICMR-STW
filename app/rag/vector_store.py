@@ -5,7 +5,12 @@ from qdrant_client.http import models
 from app.config import VECTOR_DB_URL, VECTOR_DB_API_KEY
 
 class VectorStore:
+    """
+    This class encapsulates interactions with the Qdrant vector database, providing methods to add embeddings and search for relevant chunks based on a query embedding. 
+    It is designed to be used in asynchronous contexts, such as FastAPI background tasks, to ensure non-blocking operations when retrieving clinical guidelines from the unified knowledge base.
+    """
     def __init__(self, collection_name: str):
+        """Initializes the VectorStore with the specified collection name and sets up the Qdrant client connection."""
         self.url = VECTOR_DB_URL
         self.api_key = VECTOR_DB_API_KEY
         self.collection_name = collection_name

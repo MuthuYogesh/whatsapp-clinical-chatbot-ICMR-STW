@@ -6,7 +6,7 @@ from app.state_store.store import clear_state
 
 async def mock_send_message(recipient_id, message_text):
     """
-    Replaces the WhatsApp API call with a simple print statement.
+    Mock Test Replaces the WhatsApp API call with a simple print statement.
     """
     print(f"\n[BOT]: {message_text}")
 

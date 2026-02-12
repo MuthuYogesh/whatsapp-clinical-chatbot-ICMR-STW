@@ -1,60 +1,14 @@
 import json
-from fastapi import APIRouter, Request, BackgroundTasks, Query, Response, Depends
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-from fastapi.responses import PlainTextResponse
-from starlette.middleware.base import BaseHTTPMiddleware
-
+from fastapi import APIRouter, Request, BackgroundTasks, Query, Response
 from app.state_store.store import get_state, set_state, clear_state
 from app.core.intent_classifier import detect_medical_intent
 from app.rag.explainer import explain_with_strict_rag
+from app.core.limiter import limiter, LIMIT_STRATEGY
 from app.whatsapp.sender import send_whatsapp_message
 from app.config import WHATSAPP_VERIFY_TOKEN
+from app.core.logger import log_clinical_session
 
 router = APIRouter()
-
-# --- 1. Rate Limiting Logic ---
-
-def get_whatsapp_sender_sync(request: Request) -> str:
-    """
-    Retrieves the phone number from the request state.
-    Populated by the middleware below.
-    """
-    # If middleware hasn't set it, fall back to IP (get_remote_address)
-    return getattr(request.state, "sender_phone", get_remote_address(request))
-
-limiter = Limiter(key_func=get_whatsapp_sender_sync)
-
-class WhatsAppStateMiddleware(BaseHTTPMiddleware):
-    """
-    Industry-grade solution to the 'Single Read Body' problem.
-    Reads the phone number from JSON and stores it in request.state for the Limiter.
-    """
-    async def dispatch(self, request: Request, call_next):
-        if request.method == "POST" and "/webhook-whatsapp" in request.url.path:
-            # Clone the body to allow double-reading
-            body_bytes = await request.body()
-            
-            # Simple wrapper to reset body for the next handler
-            async def receive():
-                return {"type": "http.request", "body": body_bytes}
-            request._receive = receive
-
-            try:
-                payload = json.loads(body_bytes)
-                # Dive into the WhatsApp JSON structure
-                sender = payload['entry'][0]['changes'][0]['value']['messages'][0]['from']
-                request.state.sender_phone = str(sender)
-            except (KeyError, IndexError, json.JSONDecodeError):
-                request.state.sender_phone = get_remote_address(request)
-        
-        response = await call_next(request)
-        return response
-
-# Note: You must add this middleware in app/main.py: 
-# app.add_middleware(WhatsAppStateMiddleware)
-
-# --- 2. Constants & Configuration ---
 
 DEMOGRAPHIC_QUESTIONS = [
     {"key": "age", "question": "To provide accurate guidance, please provide the patient's *Age*."},
@@ -63,26 +17,26 @@ DEMOGRAPHIC_QUESTIONS = [
     {"key": "comorbidities", "question": "Are there any known *comorbidities* or allergies (e.g., Diabetes, Asthma)?"}
 ]
 
-# --- 3. Endpoint Handlers ---
-
 @router.get("/webhook-whatsapp")
 async def verify(hub_mode: str = Query(None, alias="hub.mode"), 
                  hub_challenge: str = Query(None, alias="hub.challenge"), 
                  hub_verify_token: str = Query(None, alias="hub.verify_token")):
     if hub_verify_token == WHATSAPP_VERIFY_TOKEN:
-        return PlainTextResponse(content=hub_challenge)
+        return Response(content=hub_challenge, media_type="text/plain")
     return Response(status_code=403)
 
-
 @router.post("/webhook-whatsapp")
-@limiter.limit("10/minute") # Setting to 2/min per phone number
+@limiter.limit(LIMIT_STRATEGY)  # Apply rate limiting to the POST endpoint
 async def receive(request: Request, background_tasks: BackgroundTasks):
     """
-    Main Entry Point for whatsapp messages. Rate Limited by Phone Number.
+    Main entry point for incoming WhatsApp messages. This endpoint:
+    1. Parses incoming messages and identifies the sender and text.
+    2. Uses a turn-level intent classifier to determine if the message is a general query or a clinical case.
+    3. If it's a clinical case, initiates a demographic collection sequence.
+    4. Once all necessary information is collected, it processes the query with RAG and responds.
     """
-    # Body is already available thanks to middleware
+    print(LIMIT_STRATEGY)
     payload = await request.json()
-    
     for entry in payload.get("entry", []):
         for change in entry.get("changes", []):
             value = change.get("value", {})
@@ -91,25 +45,22 @@ async def receive(request: Request, background_tasks: BackgroundTasks):
                 text = msg.get("text", {}).get("body")
                 if sender_id and text:
                     background_tasks.add_task(medical_orchestrator, sender_id, text)
-    
     return {"status": "accepted"}
 
-# --- 4. Clinical Orchestration Logic ---
-
 async def medical_orchestrator(sender_id: str, text: str):
+    """Orchestrates the entire flow for processing incoming WhatsApp messages, including intent detection, demographic collection, RAG processing, and response sending."""
     try:
         state = get_state(sender_id)
         
-        # 1. GLOBAL RESET & START LOGIC
-        if not state or text.lower() in ["/start", "hi", "hello", "restart"]:
+        # 1. GLOBAL RESET LOGIC
+        if text.lower() in ["/start", "hi", "hello", "restart"]:
             clear_state(sender_id)
             welcome = (
                 "🏥 *Clinical Evidence Assistant (v2)*\n\n"
-                "Grounded *strictly* in ICMR-STW official guidelines.\n\n"
                 "Example Usages:\n"
-                "• *General Queries:* 'eg: What is the Dose of Amoxicillin?'\n"
-                "• *Patient Cases:* 'eg: Child with high fever...'\n\n"
-                "Type */start* to reset session data at any time."
+                "• *General:* 'What is the Dose of Amoxicillin?'\n"
+                "• *Case:* 'Child with high fever...'\n\n"
+                "Type */start* to reset."
             )
             await send_whatsapp_message(sender_id, welcome)
             set_state(sender_id, {"step": "READY", "demographics": {}})
@@ -117,16 +68,17 @@ async def medical_orchestrator(sender_id: str, text: str):
 
         # 2. TURN-LEVEL INTENT DETECTION
         analysis = await detect_medical_intent(text)
-        intent_type = analysis.get("type")
+        intent_type = analysis.get("type") # 'general' or 'case'
         expanded_q = analysis.get("expanded_query", text)
 
         # 3. DEMOGRAPHIC COLLECTION GATE
-        if state.get("step") == "AWAITING_DEMOGRAPHICS":
-            # Check if user is trying to switch to a general query mid-collection
-            if intent_type == "general" and len(text.split()) > 3:
+        # We only enter/stay here if the intent is a 'case'
+        if state and state.get("step") == "AWAITING_DEMOGRAPHICS":
+            # If user switches to a general query mid-collection, break out
+            if intent_type == "general":
                 state["step"] = "READY"
                 state["pending_query"] = None
-                # Allow flow to fall through to primary processing
+                # Fall through to PRIMARY PROCESSING below
             else:
                 idx = state.get("demographic_idx", 0)
                 key = DEMOGRAPHIC_QUESTIONS[idx]["key"]
@@ -140,47 +92,36 @@ async def medical_orchestrator(sender_id: str, text: str):
                 else:
                     state["step"] = "READY"
                     query_to_process = state.get("pending_query", text)
+                    answer = await explain_with_strict_rag(query_to_process, expanded_q, state["demographics"])
                     
-                    answer = await explain_with_strict_rag(
-                        query=query_to_process, 
-                        expanded_search=expanded_q, 
-                        demographics=state["demographics"]
-                    )
+                    log_clinical_session(sender_id, query_to_process, "case", state["demographics"], state.get("last_refs", []), answer)
                     await send_whatsapp_message(sender_id, answer)
                     
-                    state["pending_query"] = None
-                    state["demographics"] = {}
+                    state.update({"pending_query": None, "demographics": {}})
                     set_state(sender_id, state)
                     return
 
         # 4. PRIMARY PROCESSING (READY STATE)
         if intent_type == "case":
-            state.update({
+            # Start demographic sequence for new cases
+            set_state(sender_id, {
                 "step": "AWAITING_DEMOGRAPHICS",
                 "demographic_idx": 0,
                 "pending_query": text,
-                "demographics": {} 
+                "demographics": {}
             })
-            set_state(sender_id, state)
             return await send_whatsapp_message(sender_id, DEMOGRAPHIC_QUESTIONS[0]["question"])
         
         else:
-            answer = await explain_with_strict_rag(
-                query=text, 
-                expanded_search=expanded_q, 
-                demographics={}
-            )
+            # DIRECT RAG for General Queries (No demographics asked)
+            answer = await explain_with_strict_rag(text, expanded_q, {})
+            
+            log_clinical_session(sender_id, text, "general", {}, state.get("last_refs", []) if state else [], answer)
             await send_whatsapp_message(sender_id, answer)
-            set_state(sender_id, state)
-    
+            
+            if not state:
+                set_state(sender_id, {"step": "READY", "demographics": {}})
+
     except Exception as e:
-        print(f"Error in medical_orchestrator for sender {sender_id}: {str(e)}")
-        
-        error_msg = (
-            "⚠️ *Technical Connectivity Issue*\n\n"
-            "I'm having trouble reaching the clinical database right now. "
-            "Please try again in a few minutes."
-        )
-        
-        await send_whatsapp_message(sender_id, error_msg)
-        clear_state(sender_id)
+        print(f"Error in orchestrator: {e}")
+        await send_whatsapp_message(sender_id, "⚠️ Technical issue. Please try again.")

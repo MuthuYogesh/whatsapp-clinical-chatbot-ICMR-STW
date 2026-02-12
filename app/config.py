@@ -6,6 +6,7 @@ load_dotenv()
 WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
 WHATSAPP_VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN")
+WHATSAPP_APP_SECRET = os.getenv("WHATSAPP_APP_SECRET")
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
@@ -14,6 +15,9 @@ VECTOR_DB_API_KEY = os.getenv("VECTOR_DB_API_KEY")
 
 REDIS_URL = os.getenv("UPSTASH_REDIS_REST_URL")
 REDIS_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN")
+
+LIMIT_DAY = os.getenv("LIMIT_DAY")
+LIMIT_MINUTE = os.getenv("LIMIT_MINUTE")
 
 if not GROQ_API_KEY:
     raise RuntimeError("GROQ_API_KEY not set")
@@ -33,12 +37,16 @@ if not VECTOR_DB_API_KEY:
 if not REDIS_URL:
     raise RuntimeError("REDIS_URL not set")
 
-
-
 if not REDIS_TOKEN:
     raise RuntimeError("REDIS_TOKEN not set")
 
-
-
 if not WHATSAPP_VERIFY_TOKEN:
     raise RuntimeError("WHATSAPP_VERIFY_TOKEN not set") 
+
+if not WHATSAPP_APP_SECRET:
+    raise RuntimeError("WHATSAPP_APP_SECRET not set")
+
+if not LIMIT_DAY:
+    raise RuntimeError("LIMIT_DAY not set")
+if not LIMIT_MINUTE:
+    raise RuntimeError("LIMIT_MINUTE not set")

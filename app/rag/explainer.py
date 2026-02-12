@@ -9,8 +9,7 @@ async def explain_with_strict_rag(
     intent_data: dict = None  # Passed from the updated intent_classifier
 ) -> str:
     """
-    Industry-Grade Clinical Explainer.
-    Uses Hierarchical Domain Mapping and Probabilistic Ranking.
+    Clinical Explainer. It Uses Hierarchical Domain Mapping and Probabilistic Ranking.
     """
     # 1. Retrieve clinical data (using the domain-aware expanded search)
     search_term = expanded_search if expanded_search else query

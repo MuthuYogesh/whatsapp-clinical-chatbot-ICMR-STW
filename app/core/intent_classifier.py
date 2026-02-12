@@ -1,6 +1,15 @@
 from app.llm.groq_client import call_groq
 
 async def detect_medical_intent(text: str) -> dict:
+    """
+    Uses a turn-level intent classifier to analyze the incoming message and determine if it's a general query or a clinical case.
+    It also extracts potential clinical domains and conditions to help guide the conversation flow.
+    The prompt is designed to elicit structured information that can be used for routing and processing the query effectively. The response includes:
+        - "type": Indicates if the message is a "case"
+        - "domains": A list of relevant clinical domains (e.g., ENT, Nephrology)
+        - "ranked_conditions": A ranked list of potential clinical conditions with associated probabilities
+        - "expanded_query": A reformulated query that can be used for retrieval from the vector database
+    """
     prompt = f"""
     Analyze the medical query: "{text}"
     
