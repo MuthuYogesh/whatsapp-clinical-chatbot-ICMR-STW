@@ -12,6 +12,8 @@ VOLUMES = ["Vol1.pdf", "Vol2.pdf", "Vol3.pdf", "Vol4.pdf"]
 BATCH_SIZE = 100
 
 def build_unified_index():
+    """Builds a unified vector index for all ICMR-STW volumes with enhanced metadata for precise retrieval."""
+
     client = QdrantClient(url=VECTOR_DB_URL, api_key=VECTOR_DB_API_KEY)
     collection_name = "icmr_stw_knowledge_base"
 
@@ -32,6 +34,7 @@ def build_unified_index():
             field_schema=models.PayloadSchemaType.KEYWORD,
         )
 
+    # Process each volume, chunk it, embed it, and upsert to Qdrant with rich metadata
     for file in VOLUMES:
         filename = f"data/stw/{file}"
         if not os.path.exists(filename): continue

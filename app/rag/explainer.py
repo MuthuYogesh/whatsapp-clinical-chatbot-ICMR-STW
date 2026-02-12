@@ -2,36 +2,40 @@ import json
 from app.llm.groq_client import call_groq
 from app.rag.retriever import retrieve_relevant_chunks
 
-async def explain_with_strict_rag(query: str, expanded_search: str = None, demographics: dict = None) -> str:
+async def explain_with_strict_rag(
+    query: str, 
+    expanded_search: str = None, 
+    demographics: dict = None,
+    intent_data: dict = None  # Passed from the updated intent_classifier
+) -> str:
     """
-    Strictly answers clinical queries using the unified PDF context.
-    Bridges drug names to clinical categories using the expanded search.
+    Clinical Explainer. It Uses Hierarchical Domain Mapping and Probabilistic Ranking.
     """
-    # 1. Retrieve clinical data using the expanded search term
+    # 1. Retrieve clinical data (using the domain-aware expanded search)
     search_term = expanded_search if expanded_search else query
     chunks_with_metadata = await retrieve_relevant_chunks(search_term)
     
-    # 2. Build the context with Precision Reference IDs
+    # 2. Build context with Precision Reference IDs
     context_blocks = []
     for chunk in chunks_with_metadata:
-        raw_source = chunk.get('source', 'Vol_Unknown')
-        vol_formatted = raw_source.replace('.pdf', '').replace('Vol', 'Vol_')
+        vol = chunk.get('source', 'Vol_X').replace('.pdf', '').replace('Vol', 'Vol_')
+        stw = chunk.get('stw_name', 'Guideline').replace(' ', '_')
+        pg = chunk.get('page_number', 'NA')
         
-        stw_name = chunk.get('stw_name', 'General_Guideline').replace(' ', '_')
-        page_num = chunk.get('page_number', 'NA')
-        
-        # CHANGED: New requested format [ICMR-STW-Vol_X-STW_NAME:Pg_no:XX]
-        ref_id = f"ICMR-STW-{vol_formatted}-{stw_name}:Pg_no:{page_num}"
+        ref_id = f"ICMR-STW-{vol}-{stw}:Pg_no:{pg}"
         context_blocks.append(f"[REF_ID: {ref_id}]\n{chunk['text']}")
     
     context = "\n\n---\n\n".join(context_blocks)
 
-    # 3. Enhanced Medical Prompt with Revised Formatting Rules
+    # 3. Hierarchical Probability Prompt
     prompt = f"""
-    SYSTEM: You are a Medical Evidence Assistant. Answer ONLY using the provided context.
+    SYSTEM: You are a Medical Decision Support System. Answer ONLY using the provided context.
     
+    HIERARCHICAL MAPPING DATA:
+    {json.dumps(intent_data) if intent_data else "Map based on query content."}
+
     PATIENT DATA: 
-    {json.dumps(demographics) if demographics else "No specific patient data provided."}
+    {json.dumps(demographics) if demographics else "General query."}
     
     OFFICIAL CLINICAL CONTEXT (ICMR STWs):
     \"\"\"
@@ -40,23 +44,31 @@ async def explain_with_strict_rag(query: str, expanded_search: str = None, demog
 
     USER QUERY: {query}
 
-    STRICT RESPONSE RULES:
-    1. MANDATORY OPENING: You MUST start the response by identifying the primary STW used.
-       Format exactly like this: "According to the *[ref_id_example_here]*:"
-       (Example: According to the *[ICMR-STW-Vol_1-ENT-Acute_Rhinosinusitis:Pg_no:25]*:)
-    
-    2. WHATSAPP BOLDING: You MUST wrap all drug names, specific doses, and durations in asterisks.
-       - Correct: *800mg* five times a day.
-       - Incorrect: 800mg five times a day.
-    
-    3. CITATION FORMAT: Use the format [*[ICMR-STW-Vol_X-Name:Pg_no:XX]*] at the end of each fact. 
-       Do NOT include the prefix "REF_ID:".
-    
-    4. CLINICAL BRIDGING: Apply guidelines for a therapeutic class to specific drugs mentioned in the query. 
-    
-    5. PRIORITY ACTION: If the context mentions "Referral" or "District Hospital", list this as the most prominent recommendation.
-    
-    6. NO HALLUCINATION: If the information is missing, state it clearly.
+    ---
+    STRICT FORMATTING RULES:
+    1. START DIRECTLY: No preambles or "Based on context..." intros.
+    2. BOLDING: Use *asterisks* for drug names and doses.
+    3. CITATIONS: Use the format [*[ICMR-STW-Vol_X-Name:Pg_no:XX]*].
+
+    ---
+    IF DIAGNOSTIC CASE:
+    Use the A-G Template.
+    *C. Differential Diagnosis*: Provide a **Probabilistic Ranked List** of conditions. 
+    Assign "High", "Medium", or "Low" probability based on how well the patient's symptoms match the guidelines in the context.
+
+    *A. Chief Clinical Summary*: (Brief overview)
+    *B. Key Findings*: (Age, Gender, Weight, and Symptoms)
+    *C. Differential Diagnosis*: (Ranked List with Probability % or Levels)
+    *D. Supporting Evidence*: (Cite specific rules for the #1 ranked condition)
+    *E. Risks & Red Flags*: (Life-threatening signs)
+    *F. Recommended Next Steps*: (Referral or action)
+    *G. Confidence & Limitations*: (Confidence in the ranking provided)
+
+    ---
+    IF GENERAL SEARCH:
+    1. State the Primary Guideline answer first.
+    2. Add a section: "PROBABLE ALTERNATIVES". 
+       - If the drug dose or rule differs for other related conditions (e.g., Sinusitis vs. Pharyngitis), list them in ranked order of probability.
     """
 
     return await call_groq(

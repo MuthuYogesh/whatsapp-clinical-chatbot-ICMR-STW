@@ -13,4 +13,8 @@ else:
     _model = SentenceTransformer("all-MiniLM-L6-v2")
 
 def embed_texts(texts: list[str]) -> np.ndarray:
+    """
+    Generates embeddings for a list of texts using the SentenceTransformer model.
+    The model is loaded from a local path to avoid repeated downloads, ensuring efficient embedding generation for the RAG system.
+    """
     return _model.encode(texts, convert_to_numpy=True)

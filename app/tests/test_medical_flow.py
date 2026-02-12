@@ -5,6 +5,13 @@ from app.state_store.store import clear_state, set_state
 
 @pytest.mark.asyncio
 async def test_clinical_logic_flow():
+    """
+    This test simulates a complete clinical case flow, including:
+    1. Case detection via the intent classifier.
+    2. Sequential demographic collection with state management.
+    3. RAG processing with mocked retriever and explainer.
+    4. Final response verification to ensure the correct integration of retrieved sources and generated explanations.
+    """
     user_id = "test_logic_user"
     clear_state(user_id)
     set_state(user_id, {"step": "READY", "demographics": {}})

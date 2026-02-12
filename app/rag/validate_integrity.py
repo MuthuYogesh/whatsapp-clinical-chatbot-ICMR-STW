@@ -5,6 +5,13 @@ from app.rag.loader import load_pdf_text
 from app.config import VECTOR_DB_URL, VECTOR_DB_API_KEY
 
 async def validate_pdf_integrity():
+    """
+    This script validates the integrity of the PDF extraction and indexing process by:
+    1. Loading the original PDF text to get the expected head and tail snippets.
+    2. Scrolling through the Qdrant collection to retrieve all chunks for each volume.
+    3. Checking if the head and tail snippets are present in the retrieved chunks, confirming that the entire document was processed and indexed correctly.
+    This is crucial for ensuring that the RAG system functions correctly.
+    """
     client = QdrantClient(url=VECTOR_DB_URL, api_key=VECTOR_DB_API_KEY)
     collection = "icmr_stw_knowledge_base"
     volumes = ["Vol1.pdf", "Vol2.pdf", "Vol3.pdf", "Vol4.pdf"]

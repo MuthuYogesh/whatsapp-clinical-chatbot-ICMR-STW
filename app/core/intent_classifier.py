@@ -2,35 +2,38 @@ from app.llm.groq_client import call_groq
 
 async def detect_medical_intent(text: str) -> dict:
     """
-    Classifies intent and maps specific drugs to clinical categories 
-    to ensure the vector search finds relevant guideline sections.
+    Uses a turn-level intent classifier to analyze the incoming message and determine if it's a general query or a clinical case.
+    It also extracts potential clinical domains and conditions to help guide the conversation flow.
+    The prompt is designed to elicit structured information that can be used for routing and processing the query effectively. The response includes:
+        - "type": Indicates if the message is a "case"
+        - "domains": A list of relevant clinical domains (e.g., ENT, Nephrology)
+        - "ranked_conditions": A ranked list of potential clinical conditions with associated probabilities
+        - "expanded_query": A reformulated query that can be used for retrieval from the vector database
     """
     prompt = f"""
     Analyze the medical query: "{text}"
     
     TASK:
-    1. Classify Type: 
-       - "case": Active symptoms, treatment failure, or patient-specific scenarios.
-       - "general": Theoretical questions, drug definitions, or general protocols.
-       - "greet": Basic greetings.
-    2. Search Expansion: 
-       - If a specific drug is mentioned, include its therapeutic category (e.g., 'Oxymetazoline' -> 'topical nasal decongestant', 'Amoxicillin' -> 'penicillin antibiotic').
-       - If a timeline is mentioned (e.g., '10 days'), include 'treatment failure' or 'referral criteria'.
+    1. Identify Clinical Domain(s): (e.g., ENT, Nephrology, Pediatrics, Pulmonology).
+    2. Ranked Differential Mapping: 
+       - List the 3 most probable ICMR-STW clinical conditions in order of probability.
+       - Example: "Sinus pain" -> 1. Acute Rhinosinusitis (ENT), 2. Allergic Rhinitis (ENT), 3. Common Cold (Pulm/Gen).
+    3. Category Expansion: Add formal terms like 'Management Protocol' or 'Drug Dosage'.
 
     Return ONLY JSON:
     {{
-        "type": "case" | "general" | "greet",
-        "expanded_query": "original term + clinical category + synonyms"
+        "type": "case" | "general",
+        "domains": ["Domain1", "Domain2"],
+        "ranked_conditions": [
+            {{"name": "Condition 1", "probability": "High"}},
+            {{"name": "Condition 2", "probability": "Medium"}}
+        ],
+        "expanded_query": "concatenated search terms for vector DB"
     }}
     """
-    
     response = await call_groq(
         messages=[{"role": "user", "content": prompt}],
         model="llama-3.1-8b-instant",
         response_format="json_object"
     )
-    
-    if not response:
-        return {"type": "unknown", "expanded_query": text}
-        
-    return response
+    return response if response else {{"type": "unknown", "expanded_query": text}}
