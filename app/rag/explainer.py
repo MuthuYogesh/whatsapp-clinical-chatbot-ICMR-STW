@@ -77,3 +77,42 @@ async def explain_with_strict_rag(
         temperature=0, 
         response_format="text"
     )
+
+async def explain_with_hybrid_rag(query: str, expanded_search: str = None) -> str:
+    # 1. Retrieve RAG chunks
+    chunks_with_metadata = await retrieve_relevant_chunks(expanded_search or query)
+    
+    # 2. Build context with Precision Reference IDs (Same as strict mode)
+    context_blocks = []
+    for chunk in chunks_with_metadata:
+        vol = chunk.get('source', 'Vol_X').replace('.pdf', '').replace('Vol', 'Vol_')
+        stw = chunk.get('stw_name', 'Guideline').replace(' ', '_')
+        pg = chunk.get('page_number', 'NA')
+        
+        ref_id = f"ICMR-STW-{vol}-{stw}:Pg_no:{pg}"
+        context_blocks.append(f"[REF_ID: {ref_id}]\n{chunk['text']}")
+    
+    context = "\n\n---\n\n".join(context_blocks)
+
+    prompt = f"""
+    SYSTEM: You are a Clinical Research Assistant. 
+    
+    PRIMARY DATA SOURCE (ICMR-STW):
+    \"\"\"
+    {context}
+    \"\"\"
+
+    USER QUERY: {query}
+
+    RULES:
+    1. If the answer is in the PRIMARY DATA SOURCE, you MUST use it and cite the exact Ref_ID in brackets like [[ICMR-STW-Vol_X-Name:Pg_no:XX]].
+    2. If the answer is NOT in the context, you may use your internal clinical training.
+    3. If using internal knowledge, start the section with: "*NOTE: Evidence based on general clinical knowledge.*"
+    4. Provide clear, bulleted drug dosages and protocols.
+    """
+
+    return await call_groq(
+        messages=[{"role": "user", "content": prompt}],
+        model="llama-3.3-70b-versatile",
+        temperature=0.2
+    )
