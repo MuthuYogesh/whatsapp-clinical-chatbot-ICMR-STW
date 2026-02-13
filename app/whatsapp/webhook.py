@@ -2,7 +2,7 @@ import json
 from fastapi import APIRouter, Request, BackgroundTasks, Query, Response
 from app.state_store.store import get_state, set_state, clear_state
 from app.core.intent_classifier import detect_medical_intent
-from app.rag.explainer import explain_with_strict_rag
+from app.rag.explainer import explain_with_strict_rag, explain_with_hybrid_rag
 from app.core.limiter import limiter, LIMIT_STRATEGY
 from app.whatsapp.sender import send_whatsapp_message
 from app.config import WHATSAPP_VERIFY_TOKEN
@@ -16,6 +16,14 @@ DEMOGRAPHIC_QUESTIONS = [
     {"key": "weight", "question": "What is the patient's *Weight in kg*? (Essential for accurate dosing)."},
     {"key": "comorbidities", "question": "Are there any known *comorbidities* or allergies (e.g., Diabetes, Asthma)?"}
 ]
+
+SELECTION_MENU = (
+    "\n\n---\n"
+    "🔄 *Select next action:*\n"
+    "*1* ➔ New Patient Case\n"
+    "*2* ➔ New General Search\n"
+    "Type */start* to reset."
+)
 
 @router.get("/webhook-whatsapp")
 async def verify(hub_mode: str = Query(None, alias="hub.mode"), 
@@ -39,90 +47,87 @@ async def receive(request: Request, background_tasks: BackgroundTasks):
                     background_tasks.add_task(medical_orchestrator, sender_id, text)
     return {"status": "accepted"}
 
+
 async def medical_orchestrator(sender_id: str, text: str):
     try:
-        state = get_state(sender_id) or {"step": "READY", "demographics": {}}
+        state = get_state(sender_id) or {"step": "READY"}
         
         # 1. GLOBAL RESET
         if text.lower() in ["/start", "hi", "hello", "restart"]:
             clear_state(sender_id)
             welcome = (
-                "🏥 *Clinical Evidence Assistant (v2)*\n\n"
-                "Example Usages:\n"
-                "• *General:* 'What is the Dose of Amoxicillin?'\n"
-                "• *Case:* 'Child with high fever...'\n\n"
-                "Type */start* to reset."
+                "🏥 *Clinical Evidence Assistant (v4)*\n\n"
+                "Please select your pathway:\n"
+                "*1* ➔ *Patient Case* (Strict ICMR Standard Treatment Workflows (STW) Guidelines)\n"
+                "*2* ➔ *General Search* (Hybrid Knowledge)\n\n"
+                "Reply with *1* or *2* to begin."
             )
             await send_whatsapp_message(sender_id, welcome)
-            set_state(sender_id, {"step": "READY", "demographics": {}})
+            set_state(sender_id, {"step": "SELECT_PATHWAY"})
             return
 
-        # 2. FLOW ROUTING
-        # IF WE ARE COLLECTING DATA:
+        # 2. PATHWAY SELECTION
+        if state.get("step") == "SELECT_PATHWAY":
+            if text == "1":
+                state.update({"step": "AWAITING_CASE_QUERY", "pathway": "case"})
+                set_state(sender_id, state)
+                return await send_whatsapp_message(sender_id, "📝 Describe the *Patient Case* (e.g., 'Child with high fever').")
+            elif text == "2":
+                state.update({"step": "AWAITING_SEARCH_QUERY", "pathway": "search"})
+                set_state(sender_id, state)
+                return await send_whatsapp_message(sender_id, "🔍 What would you like to *Search*?")
+            else:
+                return await send_whatsapp_message(sender_id, "⚠️ Please reply with *1* or *2*.")
+
+        # 3. CASE PATHWAY
+        if state.get("step") == "AWAITING_CASE_QUERY":
+            state.update({"step": "AWAITING_DEMOGRAPHICS", "pending_query": text, "demographic_idx": 0, "demographics": {}})
+            set_state(sender_id, state)
+            return await send_whatsapp_message(sender_id, DEMOGRAPHIC_QUESTIONS[0]["question"])
+
         if state.get("step") == "AWAITING_DEMOGRAPHICS":
             idx = state.get("demographic_idx", 0)
             key = DEMOGRAPHIC_QUESTIONS[idx]["key"]
-            
-            # Save current answer
             state["demographics"][key] = text
             
             if idx + 1 < len(DEMOGRAPHIC_QUESTIONS):
-                # Ask Next Question
                 state["demographic_idx"] = idx + 1
-                next_q = DEMOGRAPHIC_QUESTIONS[idx+1]["question"]
                 set_state(sender_id, state)
-                return await send_whatsapp_message(sender_id, next_q)
+                return await send_whatsapp_message(sender_id, DEMOGRAPHIC_QUESTIONS[idx+1]["question"])
             else:
-                # --- CASE COMPLETE: PROCESS FINAL RAG ---
-                # Retrieve the locked data
-                original_query = state.get("pending_query")
-                original_analysis = state.get("pending_analysis", {})
-                
-                # IMPORTANT: Use the original intent data for the explainer
+                # --- PROCESS CASE ---
+                analysis = await detect_medical_intent(state["pending_query"])
                 answer = await explain_with_strict_rag(
-                    query=original_query, 
-                    expanded_search=original_analysis.get("expanded_query"), 
+                    query=state["pending_query"], 
+                    expanded_search=analysis.get("expanded_query"), 
                     demographics=state["demographics"],
-                    intent_data=original_analysis
+                    intent_data=analysis
                 )
                 
-                await send_whatsapp_message(sender_id, answer)
-                log_clinical_session(sender_id, original_query, "case", state["demographics"], [], answer)
+                # Append the menu and loop back the state
+                final_response = answer + SELECTION_MENU
+                await send_whatsapp_message(sender_id, final_response)
+                log_clinical_session(sender_id, state["pending_query"], "case", state["demographics"], [], answer)
                 
-                # Clean up state
-                clear_state(sender_id)
-                set_state(sender_id, {"step": "READY", "demographics": {}})
+                set_state(sender_id, {"step": "SELECT_PATHWAY"})
                 return
 
-        # 3. NEW INTENT DETECTION (Only reached if not in the middle of a case)
-        analysis = await detect_medical_intent(text)
-        intent_type = analysis.get("type") 
-        expanded_q = analysis.get("expanded_query", text)
-
-        # 4. PRIMARY PROCESSING (READY STATE)
-        if intent_type == "case":
-            # Initiate demographic sequence
-            set_state(sender_id, {
-                "step": "AWAITING_DEMOGRAPHICS",
-                "demographic_idx": 0,
-                "pending_query": text,
-                "pending_analysis": analysis, # Save the clinical domains/intent here!
-                "demographics": {}
-            })
-            return await send_whatsapp_message(sender_id, DEMOGRAPHIC_QUESTIONS[0]["question"])
-        
-        else:
-            # General Queries
-            answer = await explain_with_strict_rag(
-                query=text, 
-                expanded_search=expanded_q, 
-                demographics={}, 
-                intent_data=analysis
+        # 4. SEARCH PATHWAY
+        if state.get("step") == "AWAITING_SEARCH_QUERY":
+            analysis = await detect_medical_intent(text)
+            answer = await explain_with_hybrid_rag(
+                query=text,
+                expanded_search=analysis.get("expanded_query")
             )
-            await send_whatsapp_message(sender_id, answer)
-            log_clinical_session(sender_id, text, "general", {}, [], answer)
-            set_state(sender_id, {"step": "READY", "demographics": {}})
+            
+            # Append the menu and loop back the state
+            final_response = answer + SELECTION_MENU
+            await send_whatsapp_message(sender_id, final_response)
+            log_clinical_session(sender_id, text, "search", {}, [], answer)
+            
+            set_state(sender_id, {"step": "SELECT_PATHWAY"})
+            return
 
     except Exception as e:
-        print(f"Error in orchestrator: {e}")
-        await send_whatsapp_message(sender_id, "⚠️ Technical issue. Please try again.")
+        print(f"Error in v5 Orchestrator: {e}")
+        await send_whatsapp_message(sender_id, "⚠️ Technical issue. Type */start* to reset.")
